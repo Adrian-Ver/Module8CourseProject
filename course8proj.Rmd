@@ -1,0 +1,132 @@
+---
+title: "Practical Machine Learning Project"
+author: "Adrian-Ver Federizo"
+date: "December 11, 2018"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+This project is the last requirement for the Practical Machine Learning under the Data Science Specialization in Coursera. We aim to provide prediction for a new set of observations using machine learning tools that will come up with a predictive model. 
+
+The data set that was used in the wanalysis is the Weight Lifting Exercise Dataset, which contains information about different ways of performing barbell lifts where one correct case and five incorrect cases were considered.
+
+## Preparing important functions
+
+First, we load the packages that will be used for the analysis, which are the 'caret' package for building predictive algorithms, and 'dplyr' for data preprocessing.
+```{r libraries, message = F, cache=TRUE}
+library(caret)
+library(dplyr)
+```
+Next we import the data needed, which were downloaded from the following websites: training data from https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv and test data from https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv . Data downloaded were saved in the working directory for easier importing.
+```{r import, cache=TRUE}
+pml_training <- read.csv("pml-training.csv")
+pml_testing <- read.csv("pml-testing.csv")
+pml_training$classe <- as.factor(pml_training$classe)
+```
+
+## Preliminaries and Descriptives
+Before the analysis proper of the data, we first perform some basic exploratory data analysis, and inspection of the properties of the data at hand.
+
+```{r, cache=TRUE, message = F}
+# descriptives for the training data set
+dim(pml_training); dim(pml_testing)
+names(pml_training)
+table(pml_training$classe)
+round(100*prop.table(
+    table(pml_training$user_name, pml_training$classe),
+    margin = 1), digits = 4)
+```
+After some descriptives, we proceed on identifying what predictors are useful for the analysis. We check for the number of missing values per column, since variables with a lot of missing data will most often be not helpful. We have also removed variables pertaining to timestamp, since those variables are only labels and is not involved in any way with the analysis.
+```{r preprocess, cache=TRUE}
+#  removing irrelevant columns (timestamp and NA columns)
+pml_training <- pml_training[,colSums(is.na(pml_training)) == 0]
+pml_testing <- pml_testing[,colSums(is.na(pml_training)) == 0]
+pml_training <- pml_training %>% 
+    select(-contains("timestamp")) %>%
+    select(-contains("skewness")) %>%
+    select(-contains("kurtosis")) %>%
+    select(-contains("max")) %>%
+    select(-contains("min")) %>%
+    select(-contains("amplitude"))
+pml_testing <- pml_testing %>% 
+    select(-contains("timestamp")) %>%
+    select(-contains("skewness")) %>%
+    select(-contains("kurtosis")) %>%
+    select(-contains("max")) %>%
+    select(-contains("min")) %>%
+    select(-contains("amplitude"))
+```
+## Creating training and validation sets
+After the some preliminary data processing, we can now proceed with setting up the training and validation data sets. This will be implemented by randomly splitting the training set further into two parts using the 'createDataPartition' function.
+```{r splitting, cache=TRUE}
+# creating training and validation data sets within training data set
+set.seed(1975)
+inTrain <- createDataPartition(pml_training$classe, p = 0.7, list = F)
+pml_training_train <- pml_training[inTrain,]
+pml_training_test <- pml_training[-inTrain,]
+```
+## Building Prediction Models
+Upon setting up the training and validation data sets, we can now perform prediction with the training data then test the models using the validation set. Several methods were used, where their performances were evaluated using the 'confusionMatrix' function in 'caret'. The first algorithm that will be used for prediction with the Weight Lifting data is through random trees.
+```{r method_1_random_tree, cache=T, message = F}
+# method 1: creating a simple random tree
+set.seed(1975)
+pml_fit_rpart <- train(classe ~ . , data = pml_training_train, method = "rpart")
+pml_pred_rpart <- predict(pml_fit_rpart, newdata = pml_training_test)
+```
+
+```{r}
+(cm_rpart <- confusionMatrix(pml_pred_rpart, pml_training_test$classe))
+```
+
+Under the random tree algorithm, we notice a 66% correct classification rate when we have tested the model coming from the training set to the validation set. However we note that the random tree incorrectly predicts all (incorrect) methods C and D as E. That misclassification is the main driver that leads to the lower correct classification rate.
+
+The next presented method is through random forests.
+
+```{r method_2_random_forest, cache = T, message = F}
+# method 2: creating a random forest
+set.seed(1975)
+pml_fit_rf <- train(classe ~ . , data = pml_training_train, method = "rf")
+pml_pred_rf <- predict(pml_fit_rf, newdata = pml_training_test)
+
+```
+
+```{r}
+(cm_rf <- confusionMatrix(pml_pred_rf, pml_training_test$classe))
+```
+It is surprising that such method leads to perfect classification of the methods to its correct class, with 100% accuracy. This practically means that this method is sufficient for prediction on the test set, however will try the other methods anyway for the sake of intellectual curiosity.
+
+The following method presented is by performing repeated cross-validation where the method uses random trees. Note that the number of cross-validation sets was set to 5, which is the usual value for such parameter.
+```{r method_3_cv_random_tree, cache=TRUE, message = F}
+# method 3: creating repeated cross-validation within training set
+set.seed(1975)
+pml_fit_cv <- train(classe ~ . , data = pml_training_train, method = "rpart", trControl = trainControl(method = "cv", number = 5))
+pml_pred_cv <- predict(pml_fit_cv, newdata = pml_training_test)
+```
+
+```{r}
+(cm_cv <- confusionMatrix(pml_pred_cv, pml_training_test$classe))
+```
+We note that its performance is practically the same as when we have performed the usual random trees. Thus, we will not opt for this method as we should always go for the simpler method for prediction if the methods we are comparing have the same performance.
+
+We will also present the results when we perform gradient boosting method as follows.
+
+```{r method_4_gbm, cache = T, message = F}
+# method 4: using gradient boosting method
+set.seed(1975)
+pml_fit_gbm <- train(classe ~ . , data = pml_training_train, method = "gbm")
+pml_pred_gbm <- predict(pml_fit_gbm, newdata = pml_training_test)
+```
+
+```{r}
+(cm_gbm <- confusionMatrix(pml_pred_gbm, pml_training_test$classe))
+```
+We observe that under GBM, the performance is near excellent, with only one misclassification out of all the instances. This is expected for a complicated modelling algorithm, but then we will choose the prediction coming from random forests as the method performs the best among the methods.
+
+Now, we apply the algorithm in predicting the actual test set, that we have no prior information, with results as follows:
+```{r prediction, cache=TRUE, message = F}
+# predict on the test data set
+(pml_pred_test <- predict(pml_fit_rf, newdata = pml_testing))
+```
+From the results, we conclude that all the data provided for the test set has all correct method (method A) in barbell lifting.
+
